@@ -1,0 +1,49 @@
+_wandb:
+    value:
+        cli_version: 0.23.0
+        e:
+            2i4wau2ema6ae5pc4azc1ckqptul674o:
+                codePath: streamlit_app.py
+                codePathLocal: streamlit_app.py
+                cpu_count: 1
+                cpu_count_logical: 2
+                disk:
+                    /:
+                        total: "33636024320"
+                        used: "4280827904"
+                email: alfandary1@mail.tau.ac.il
+                executable: /usr/local/bin/python3.11
+                git:
+                    commit: 0244a28a3148c59e0174c5ba76f65b0534d6c588
+                    remote: https://github.com/tomer1806/DS-FinalProject-TomerandYAli
+                host: codespaces-52f071
+                memory:
+                    total: "8330579968"
+                os: Linux-6.8.0-1030-azure-x86_64-with-glibc2.31
+                program: streamlit_app.py
+                python: CPython 3.11.13
+                root: /workspaces/DS-FinalProject-TomerandYAli
+                startedAt: "2025-11-24T13:40:17.255396Z"
+                writerId: 2i4wau2ema6ae5pc4azc1ckqptul674o
+        m: []
+        python_version: 3.11.13
+        t:
+            "1":
+                - 5
+                - 6
+                - 53
+            "2":
+                - 5
+                - 6
+                - 53
+            "3":
+                - 2
+                - 16
+            "4": 3.11.13
+            "5": 0.23.0
+            "12": 0.23.0
+            "13": linux-x86_64
+lr:
+    value: 0.01
+n_estimators:
+    value: 50

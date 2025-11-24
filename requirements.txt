@@ -2,7 +2,9 @@ streamlit
 pandas
 numpy
 scikit-learn
-plotly
-seaborn
-matplotlib
 xgboost
+plotly
+matplotlib
+seaborn
+shap
+wandb

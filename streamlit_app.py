@@ -1,287 +1,486 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
 import seaborn as sns
 import matplotlib.pyplot as plt
+import shap
+import wandb
+import os
+
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_error, r2_score, mean_squared_error
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
 
 # --- 1. PAGE CONFIG ---
-st.set_page_config(page_title="BMW Price Analytics", page_icon="🚘", layout="wide")
+st.set_page_config(
+    layout="wide",
+    page_title="BMW Price Analytics",
+    page_icon="🚘"
+)
 
-# --- 2. LOAD DATA ---
+# Set Seaborn style for better charts
+sns.set_theme(style="whitegrid")
+
+# --- 2. DATA LOADING & PROCESSING (Cached) ---
 @st.cache_data
 def load_data():
-    df = pd.read_csv('bmw.csv')
-    return df
+    try:
+        df = pd.read_csv('bmw.csv')
+        return df
+    except FileNotFoundError:
+        return None
 
-try:
-    df = load_data()
-except:
-    st.error("File bmw.csv not found. Please upload it to the project folder.")
-    st.stop()
-
-# --- 3. MODEL PIPELINE BUILDER ---
-def get_model_pipeline(model_name, xgb_params=None):
-    # Define features types
+@st.cache_resource
+def build_pipeline(df):
+    # Separate features and target
+    X = df.drop('price', axis=1)
+    y = df['price']
+    
+    # Identify columns
     categorical_cols = ['model', 'transmission', 'fuelType']
     numerical_cols = ['year', 'mileage', 'tax', 'mpg', 'engineSize']
-
-    # Create the preprocessor
-    # This handles all the "Feature Engineering" automatically:
-    # 1. Scaling numerical numbers (so mileage doesn't dominate year)
-    # 2. One-Hot Encoding categorical text (converting 'Manual' to 0/1)
+    
+    # Build Transformer
     preprocessor = ColumnTransformer(
         transformers=[
             ('num', StandardScaler(), numerical_cols),
-            ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_cols)
-        ]
+            ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), categorical_cols)
+        ],
+        verbose_feature_names_out=False
     )
-
-    # Select the model
-    if model_name == 'XGBoost':
-        if xgb_params:
-            model = XGBRegressor(**xgb_params, random_state=42)
-        else:
-            model = XGBRegressor(random_state=42)
-    else:
-        model = LinearRegression()
-
-    # Bundle preprocessor and model together
-    pipeline = Pipeline(steps=[
-        ('preprocessor', preprocessor),
-        ('model', model)
-    ])
     
-    return pipeline
-
-# --- 4. SIDEBAR NAVIGATION ---
-st.sidebar.title("BMW Analytics Suite 🧭")
-page = st.sidebar.radio("Navigate", 
-    ["1. Business & Data", 
-     "2. Insights & EDA", 
-     "3. Price Prediction", 
-     "4. Feature Importance", 
-     "5. Tuning Dashboard"])
-
-# --- 5. PAGE 1: BUSINESS & DATA ---
-if page == "1. Business & Data":
-    st.title("🚘 BMW Valuation System")
+    # Transform data
+    X_processed = preprocessor.fit_transform(X)
     
-    # --- Image Loading ---
+    # Get feature names
     try:
-        st.image("bmw_car.jpg", width=700)
+        feature_names = preprocessor.get_feature_names_out()
     except:
-        st.warning("Image 'bmw_car.jpg' not found. Please upload it for a better look!")
+        feature_names = [f"feat_{i}" for i in range(X_processed.shape[1])]
+        
+    X_processed_df = pd.DataFrame(X_processed, columns=feature_names)
+    
+    # Split Data
+    X_train, X_test, y_train, y_test = train_test_split(X_processed_df, y, test_size=0.2, random_state=42)
+    
+    # Train Models
+    models = {
+        'Linear Regression': LinearRegression().fit(X_train, y_train),
+        'XGBoost': XGBRegressor(n_estimators=100, learning_rate=0.1, random_state=42).fit(X_train, y_train),
+        'Random Forest': RandomForestRegressor(n_estimators=50, max_depth=10, random_state=42).fit(X_train, y_train)
+    }
+
+    return models, X_train, X_test, y_train, y_test, preprocessor, feature_names
+
+# Load Data
+df_raw = load_data()
+
+if df_raw is None:
+    st.error("🚨 Error: 'bmw.csv' not found. Please upload it.")
+    st.stop()
+
+# Initialize Pipeline
+with st.spinner("⚙️ Training Models & Preparing Data..."):
+    models, X_train, X_test, y_train, y_test, preprocessor, feature_names = build_pipeline(df_raw)
+
+
+# --- 3. SIDEBAR NAVIGATION ---
+st.sidebar.title("Navigation 🧭")
+page = st.sidebar.radio("Go to", 
+    ["🏠 Business Case & Data", 
+     "📊 Data Visualizations", 
+     "🤖 Prediction & Evaluation",
+     "🔍 AI Explainability",
+     "🎛️ Hyperparameter Tuning"]
+)
+st.sidebar.markdown("---")
+st.sidebar.caption("DS Final Project 2025")
+
+
+# --- 4. PAGE 1: BUSINESS CASE & DATA ---
+if page == "🏠 Business Case & Data":
+    st.title("BMW Valuation System 🚘")
+    
+    # Image Handling
+    if os.path.exists("img.jpg"):
+        st.image("img.jpg", caption="The Ultimate Driving Machine", width=700)
+    else:
+        st.warning("⚠️ 'img.jpg' not found. Please upload an image.")
 
     st.markdown("---")
-    
-    # --- Business Case ---
     st.header("The Business Problem")
     st.write("""
     Used car dealerships and private sellers face a critical challenge: **Pricing Strategy**.
     
-    * **Price too high:** The car sits in the lot for months, losing value and costing money in maintenance.
+    * **Price too high:** The car sits in the lot, depreciating and costing maintenance fees.
     * **Price too low:** The seller loses potential profit immediately.
     
-    **Our Goal:** Build a Machine Learning tool that analyzes thousands of BMW sales to predict the *exact* fair market value of any car based on its specs.
+    **Our Solution:** A machine learning application that utilizes **Linear Regression**, **Random Forest**, and **XGBoost** to predict the *fair market value* of a BMW based on its year, mileage, and condition.
     """)
 
-    # --- Data Presentation ---
     with st.expander("Click to see Data & Methodology"):
         st.subheader("The Dataset")
-        st.write(f"We are using a dataset of **{len(df):,} BMW vehicles**. Here is a glimpse:")
-        st.dataframe(df.head())
+        st.write(f"We are using a dataset of **{len(df_raw):,} BMW vehicles**.")
+        st.dataframe(df_raw.head())
+        st.markdown("Source: [Kaggle - BMW Used Car Dataset](https://www.kaggle.com/datasets/adityadesai13/used-car-dataset-ford-and-mercedes)")
         
         st.subheader("Methodology: How we handle the data")
-        st.write("""
-        Before feeding data into our models, we use a **Pipeline** to transform it:
+        st.markdown("##### Step 1: Categorical Encoding")
+        st.write("Columns like `model` (e.g., '3 Series') and `fuelType` were converted into numbers using **One-Hot Encoding**.")
         
-        1.  **Categorical Data:** Columns like `model` (e.g., "3 Series") and `fuelType` (e.g., "Diesel") are text. We convert them into binary numbers using **One-Hot Encoding**.
-        2.  **Numerical Data:** Features like `mileage` (0-200,000) and `year` (1996-2020) have vastly different ranges. We use **Standard Scaling** to normalize them.
-        3.  **Modeling:** We compare a baseline **Linear Regression** against a powerful **XGBoost** model to see which best captures the complex price dynamics.
-        """)
-
-    # --- Key Stats Metrics ---
+        st.markdown("##### Step 2: Scaling")
+        st.write("Features like `mileage` (0-200k) and `year` (1996-2020) were normalized using **StandardScaler** to help the models learn faster.")
+    
     st.subheader("Quick Data Stats")
     c1, c2, c3 = st.columns(3)
-    c1.metric("Avg Price", f"£{df['price'].mean():,.0f}")
-    c2.metric("Avg Mileage", f"{df['mileage'].mean():,.0f}")
-    c3.metric("Avg Year", int(df['year'].mean()))
+    c1.metric("Avg Price", f"£{df_raw['price'].mean():,.0f}")
+    c2.metric("Avg Mileage", f"{df_raw['mileage'].mean():,.0f}")
+    c3.metric("Avg Year", int(df_raw['year'].mean()))
 
-# --- 6. PAGE 2: INSIGHTS & EDA ---
-elif page == "2. Insights & EDA":
-    st.title("📊 Market Analysis")
-    st.write("Understanding the factors that drive price before modeling.")
-    
-    tab1, tab2, tab3 = st.tabs(["Mileage Impact", "Categorical Analysis", "Correlations"])
+
+# --- 5. PAGE 2: DATA VISUALIZATIONS ---
+elif page == "📊 Data Visualizations":
+    st.title("Visual Insights: What Drives Price? 📈")
+    st.markdown("---")
+
+    tab1, tab2, tab3 = st.tabs([
+        "📉 Mileage vs. Price", 
+        "🚘 Price by Model", 
+        "🔥 Correlation Heatmap"
+    ])
     
     with tab1:
-        st.subheader("The 'Depreciation Curve'")
-        st.write("This chart shows the strongest relationship in our data: as mileage goes up, price goes down. The curve flattens out for older cars.")
-        fig = px.scatter(df, x='mileage', y='price', color='year', title="Price vs. Mileage (Colored by Year)")
-        st.plotly_chart(fig, use_container_width=True)
+        st.header("The 'Depreciation Curve'")
         
-    with tab2:
-        st.subheader("Impact of Transmission & Fuel")
-        c1, c2 = st.columns(2)
-        with c1:
-            fig1 = px.box(df, x='transmission', y='price', title="Price by Transmission")
-            st.plotly_chart(fig1, use_container_width=True)
-        with c2:
-            fig2 = px.box(df, x='fuelType', y='price', title="Price by Fuel Type")
-            st.plotly_chart(fig2, use_container_width=True)
-            
-    with tab3:
-        st.subheader("Correlation Heatmap")
-        st.write("Which numerical features are most linked to Price?")
-        numeric_df = df.select_dtypes(include=[np.number])
-        corr = numeric_df.corr()
-        fig_corr, ax = plt.subplots(figsize=(10,6))
-        sns.heatmap(corr, annot=True, cmap='coolwarm', ax=ax)
-        st.pyplot(fig_corr)
+        st.info("""
+        **Key Insight:** This chart confirms that **mileage is the strongest negative driver of price**, with a sharp drop in value occurring within the first 40,000 miles. 
+        However, **newer models (lighter dots) successfully resist this trend**, maintaining significantly higher residual values even at higher mileage points compared to older equivalents.
+        """)
+        
+        # Optimization: Sample data so the chart renders instantly
+        plot_data = df_raw.sample(n=min(2000, len(df_raw)), random_state=42)
+        
+        fig1, ax1 = plt.subplots(figsize=(10, 6))
+        sns.scatterplot(data=plot_data, x='mileage', y='price', hue='year', palette='viridis', alpha=0.6, ax=ax1)
+        ax1.set_title("Price vs. Mileage (Sampled for Performance)")
+        ax1.set_xlabel("Mileage")
+        ax1.set_ylabel("Price (£)")
+        st.pyplot(fig1)
 
-# --- 7. PAGE 3: PREDICTION ---
-elif page == "3. Price Prediction":
-    st.title("🧪 Prediction Lab")
-    st.write("Compare our two models and generate live price estimates.")
-    
-    # Prepare Data
-    X = df.drop('price', axis=1)
-    y = df['price']
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    
-    # Model Selection
-    model_choice = st.selectbox("Select Model", ["XGBoost (Best Accuracy)", "Linear Regression (Baseline)"])
-    
-    if "XGBoost" in model_choice:
-        pipeline = get_model_pipeline('XGBoost')
-    else:
-        pipeline = get_model_pipeline('Linear Regression')
+    with tab2:
+        st.header("Which Series is most expensive?")
         
-    # Train and Evaluate
-    pipeline.fit(X_train, y_train)
-    y_pred = pipeline.predict(X_test)
+        st.info("""
+        **Key Insight:** The **X7 and 8 Series command the highest median prices**, reflecting the premium positioning of BMW's luxury SUV and Tourer segments.
+        In contrast, the **1 Series and 3 Series offer the most affordable entry points**, though their wide price ranges indicate that condition and age vary heavily in these popular models.
+        """)
+        
+        # Calculate median price to sort the chart
+        order = df_raw.groupby('model')['price'].median().sort_values(ascending=False).index
+        
+        fig2, ax2 = plt.subplots(figsize=(10, 8))
+        sns.boxplot(data=df_raw, x='price', y='model', order=order, palette='coolwarm', ax=ax2)
+        ax2.set_title("Price Distribution by BMW Model")
+        ax2.set_xlabel("Price (£)")
+        ax2.set_ylabel("Model")
+        st.pyplot(fig2)
+
+    with tab3:
+        st.header("Feature Correlation Heatmap")
+        
+        st.info("""
+        **Key Insight:** **Year and Engine Size show the strongest positive correlations**, meaning that newer and more powerful cars are consistently associated with higher price tags.
+        Conversely, **Mileage displays a strong negative correlation**, providing mathematical confirmation of the depreciation trends observed in our scatter plots.
+        """)
+        
+        numeric_df = df_raw.select_dtypes(include=[np.number])
+        corr = numeric_df.corr()
+        
+        fig3, ax3 = plt.subplots(figsize=(10, 8))
+        sns.heatmap(corr, annot=True, fmt=".2f", cmap="RdBu_r", center=0, ax=ax3)
+        st.pyplot(fig3)
+
+
+# --- 6. PAGE 3: PREDICTION & EVALUATION ---
+elif page == "🤖 Prediction & Evaluation":
+    st.title("Model Performance & Comparison 🔬")
     
-    r2 = r2_score(y_test, y_pred)
-    mae = mean_absolute_error(y_test, y_pred)
+    # --- 1. EVALUATION METRICS (TOP) ---
+    st.write("We evaluated 3 different models. Here is how they compare on unseen data:")
+
+    # Calculate metrics for all 3
+    pred_xgb_test = models['XGBoost'].predict(X_test)
+    pred_lr_test = models['Linear Regression'].predict(X_test)
+    pred_rf_test = models['Random Forest'].predict(X_test)
     
-    # Show Metrics
-    st.subheader("Model Performance (Test Set)")
-    c1, c2 = st.columns(2)
-    c1.metric("R² Score", f"{r2:.3f}", help="How much of the price variance is explained by the model?")
-    c2.metric("MAE Error", f"£{mae:,.0f}", help="Average error in pounds.")
+    # Display Big Metrics
+    m1, m2, m3 = st.columns(3)
     
+    with m1:
+        st.info("Model 1: Linear Regression")
+        st.metric("R² Score", f"{r2_score(y_test, pred_lr_test):.3f}")
+        st.metric("MAE Error", f"£{mean_absolute_error(y_test, pred_lr_test):,.0f}")
+        
+    with m2:
+        st.success("Model 2: XGBoost (Winner)")
+        st.metric("R² Score", f"{r2_score(y_test, pred_xgb_test):.3f}")
+        st.metric("MAE Error", f"£{mean_absolute_error(y_test, pred_xgb_test):,.0f}")
+        
+    with m3:
+        st.warning("Model 3: Random Forest")
+        st.metric("R² Score", f"{r2_score(y_test, pred_rf_test):.3f}")
+        st.metric("MAE Error", f"£{mean_absolute_error(y_test, pred_rf_test):,.0f}")
+
     st.markdown("---")
     
-    # User Inputs for Prediction
-    st.subheader("Live Estimator: Value a Car")
+    # --- 2. ACTUAL VS PREDICTED GRAPHS ---
+    st.header("Visualizing Accuracy: Actual vs. Predicted")
     
-    xc1, xc2, xc3, xc4 = st.columns(4)
-    in_model = xc1.selectbox("Model", df['model'].unique())
-    in_year = xc2.number_input("Year", 2000, 2025, 2019)
-    in_trans = xc3.selectbox("Transmission", df['transmission'].unique())
-    in_fuel = xc4.selectbox("Fuel", df['fuelType'].unique())
+    st.info("""
+    **Key Insight:** **XGBoost and Random Forest demonstrate the tightest clustering** of points along the red diagonal line, indicating they capture both the low-end and high-end market values with high precision.
+    **Linear Regression struggles significantly with high-value outliers** (the points scattered far below the line), failing to capture the non-linear premium attached to luxury models like the i8 or X7.
+    """)
     
-    xc5, xc6, xc7, xc8 = st.columns(4)
-    in_miles = xc5.number_input("Mileage", 0, 200000, 30000)
-    in_engine = xc6.number_input("Engine (L)", 0.0, 6.0, 2.0, 0.1)
-    in_tax = xc7.number_input("Tax", 0, 500, 145)
-    in_mpg = xc8.number_input("MPG", 0.0, 100.0, 50.0)
+    # TABS including the NEW Combined Tab
+    g0, g1, g2, g3 = st.tabs(["All Models Comparison", "Linear Regression", "XGBoost", "Random Forest"])
     
-    if st.button("Estimate Price"):
+    # Helper to plot - OPTIMIZED WITH SAMPLING
+    def plot_actual_vs_pred(y_true, y_pred, name, color):
+        temp_df = pd.DataFrame({'Actual': y_true, 'Predicted': y_pred})
+        if len(temp_df) > 1000:
+            temp_df = temp_df.sample(1000, random_state=42)
+            
+        fig, ax = plt.subplots(figsize=(8, 6))
+        sns.scatterplot(x=temp_df['Actual'], y=temp_df['Predicted'], alpha=0.3, color=color, ax=ax)
+        
+        min_val = min(temp_df['Actual'].min(), temp_df['Predicted'].min())
+        max_val = max(temp_df['Actual'].max(), temp_df['Predicted'].max())
+        ax.plot([min_val, max_val], [min_val, max_val], 'k--', lw=2)
+        
+        ax.set_title(f"{name}: Actual vs Predicted")
+        ax.set_xlabel("Actual Price (£)")
+        ax.set_ylabel("Predicted Price (£)")
+        return fig
+
+    # --- NEW: COMBINED GRAPH ---
+    with g0:
+        st.write("Comparing all models on the same data points.")
+        fig_comb, ax_comb = plt.subplots(figsize=(10, 7))
+        
+        # Sample data once for fair comparison
+        indices = np.random.choice(len(y_test), min(500, len(y_test)), replace=False)
+        y_true_samp = y_test.iloc[indices]
+        
+        # Plot 3 models with distinct colors
+        sns.scatterplot(x=y_true_samp, y=pred_lr_test[indices], color='red', alpha=0.4, label='Linear Regression', ax=ax_comb)
+        sns.scatterplot(x=y_true_samp, y=pred_rf_test[indices], color='orange', alpha=0.4, label='Random Forest', ax=ax_comb)
+        sns.scatterplot(x=y_true_samp, y=pred_xgb_test[indices], color='green', alpha=0.4, label='XGBoost', ax=ax_comb)
+        
+        # Diagonal Line
+        min_v = y_true_samp.min()
+        max_v = y_true_samp.max()
+        ax_comb.plot([min_v, max_v], [min_v, max_v], 'k--', lw=2, label='Perfect Prediction')
+        
+        ax_comb.set_title("All Models: Actual vs Predicted")
+        ax_comb.set_xlabel("Actual Price (£)")
+        ax_comb.set_ylabel("Predicted Price (£)")
+        ax_comb.legend()
+        st.pyplot(fig_comb)
+
+    with g1:
+        st.pyplot(plot_actual_vs_pred(y_test, pred_lr_test, "Linear Regression", "red"))
+    with g2:
+        st.pyplot(plot_actual_vs_pred(y_test, pred_xgb_test, "XGBoost", "green"))
+    with g3:
+        st.pyplot(plot_actual_vs_pred(y_test, pred_rf_test, "Random Forest", "orange"))
+
+    st.markdown("---")
+
+    # --- 3. PREDICTION TOOL ---
+    st.title("Price Calculator Tool 🧮")
+    st.write("Configure a car below to see what each model thinks it's worth.")
+    
+    with st.expander("⚙️ Configure Vehicle", expanded=True):
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            p_model = st.selectbox("Model", sorted(df_raw['model'].unique()), index=5)
+            # UPDATED: Default Year to 2022
+            p_year = st.slider("Year", 2000, 2024, 2022)
+        with col2:
+            p_trans = st.selectbox("Transmission", df_raw['transmission'].unique())
+            p_fuel = st.selectbox("Fuel", df_raw['fuelType'].unique())
+        with col3:
+            p_miles = st.number_input("Mileage", 0, 250000, 30000, step=1000)
+            p_engine = st.number_input("Engine (L)", 0.0, 6.0, 2.0, 0.1)
+        with col4:
+            p_mpg = st.number_input("MPG", 0.0, 200.0, 50.0)
+            p_tax = st.number_input("Tax (£)", 0, 1000, 145)
+
+        run_pred = st.button("Predict Price (Run All Models) 🚀", type="primary")
+
+    if run_pred:
+        # Prepare Input
         input_data = pd.DataFrame({
-            'model': [in_model], 'year': [in_year], 'transmission': [in_trans],
-            'mileage': [in_miles], 'fuelType': [in_fuel], 'tax': [in_tax],
-            'mpg': [in_mpg], 'engineSize': [in_engine]
+            'model': [p_model], 'year': [p_year], 'transmission': [p_trans],
+            'mileage': [p_miles], 'fuelType': [p_fuel], 'tax': [p_tax],
+            'mpg': [p_mpg], 'engineSize': [p_engine]
         })
         
-        pred = pipeline.predict(input_data)[0]
-        st.success(f"Estimated Market Value: **£{pred:,.2f}**")
+        # Transform
+        input_proc = preprocessor.transform(input_data)
+        input_df = pd.DataFrame(input_proc, columns=feature_names)
+        
+        # Predict
+        pred_lr = models['Linear Regression'].predict(input_df)[0]
+        pred_xgb = models['XGBoost'].predict(input_df)[0]
+        pred_rf = models['Random Forest'].predict(input_df)[0]
+        
+        st.divider()
+        st.subheader("Prediction Results")
+        
+        r1, r2, r3 = st.columns(3)
+        with r1:
+            st.info("Linear Regression")
+            st.metric("Price Estimate", f"£{pred_lr:,.0f}")
+        with r2:
+            st.success("XGBoost")
+            st.metric("Price Estimate", f"£{pred_xgb:,.0f}")
+        with r3:
+            st.warning("Random Forest")
+            st.metric("Price Estimate", f"£{pred_rf:,.0f}")
 
-# --- 8. PAGE 4: FEATURE IMPORTANCE ---
-elif page == "4. Feature Importance":
-    st.title("🔍 Driving Factors")
-    st.write("What matters more? The year, the mileage, or the engine size?")
-    
-    X = df.drop('price', axis=1)
-    y = df['price']
-    
-    col_choice = st.selectbox("Analyze Model", ["XGBoost", "Linear Regression"])
-    
-    if col_choice == "XGBoost":
-        pipeline = get_model_pipeline('XGBoost')
-    else:
-        pipeline = get_model_pipeline('Linear Regression')
-        
-    pipeline.fit(X, y)
-    
-    # Extract feature names from preprocessor
-    feature_names = (pipeline.named_steps['preprocessor']
-                     .transformers_[1][1]
-                     .get_feature_names_out(input_features=['model', 'transmission', 'fuelType']))
-    all_features = ['year', 'mileage', 'tax', 'mpg', 'engineSize'] + list(feature_names)
-    
-    # Get importances
-    if col_choice == "Linear Regression":
-        importances = pipeline.named_steps['model'].coef_
-    else:
-        importances = pipeline.named_steps['model'].feature_importances_
-        
-    feat_df = pd.DataFrame({'Feature': all_features, 'Importance': importances})
-    feat_df['Abs_Importance'] = feat_df['Importance'].abs()
-    feat_df = feat_df.sort_values(by='Abs_Importance', ascending=False).head(15)
-    
-    fig = px.bar(feat_df, x='Importance', y='Feature', orientation='h', 
-                 title=f"Top 15 Features Impacting Price ({col_choice})")
-    st.plotly_chart(fig, use_container_width=True)
 
-# --- 9. PAGE 5: TUNING DASHBOARD ---
-elif page == "5. Tuning Dashboard":
-    st.title("🎛️ W&B Simulation: XGBoost Tuning")
-    st.write("Tracking experiments to optimize the **Number of Trees (n_estimators)** in XGBoost.")
+# --- 7. PAGE 4: EXPLAINABILITY ---
+elif page == "🔍 AI Explainability":
+    st.title("🤖 Why did the model predict that?")
+    st.info("Using SHAP (SHapley Additive exPlanations) to understand feature drivers.")
+
+    model_choice = st.selectbox("Choose Model", ["XGBoost", "Random Forest", "Linear Regression"])
     
-    X = df.drop('price', axis=1)
-    y = df['price']
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    if st.button("Generate Explanation"):
+        with st.spinner("Calculating SHAP values (Optimized)..."):
+            model = models[model_choice]
+            X_sample = X_test.iloc[:100].copy() 
+            
+            # --- INVERSE TRANSFORM FOR DISPLAY ---
+            scaler = preprocessor.named_transformers_['num']
+            num_cols = ['year', 'mileage', 'tax', 'mpg', 'engineSize']
+            
+            X_display = X_sample.copy()
+            X_display[num_cols] = scaler.inverse_transform(X_sample[num_cols])
+
+            # Select Explainer
+            if model_choice == "Linear Regression":
+                explainer = shap.LinearExplainer(model, X_train.iloc[:100])
+                shap_values = explainer.shap_values(X_sample)
+            else:
+                explainer = shap.TreeExplainer(model)
+                shap_values = explainer.shap_values(X_sample)
+
+            # --- PLOT 1: Feature Importance ---
+            st.subheader(f"1. Global Feature Importance ({model_choice})")
+            st.write("Which features change the price the most on average?")
+            
+            fig_shap1 = plt.figure(figsize=(10, 6))
+            shap.summary_plot(shap_values, X_display, plot_type="bar", show=False)
+            st.pyplot(fig_shap1)
+            
+            # --- PLOT 2: Dependence Plot (Interactive) ---
+            st.subheader("2. Deep Dive: Feature Dependence")
+            st.write("How does a specific feature impact the price?")
+            
+            # --- NEW: Allow user to select the feature for deep dive ---
+            feature_options = ["mileage", "year", "engineSize", "mpg", "tax"]
+            selected_feature = st.selectbox("Select feature to analyze:", feature_options, index=0)
+            
+            # Find the index/name of selected feature
+            feat_col = [c for c in X_display.columns if selected_feature in c]
+            
+            if feat_col:
+                fig_shap2, ax = plt.subplots(figsize=(10, 6))
+                shap.dependence_plot(feat_col[0], shap_values, X_display, ax=ax, show=False)
+                st.pyplot(fig_shap2)
+            else:
+                st.warning(f"Could not find {selected_feature} in dataset.")
+
+
+# --- 8. PAGE 5: TUNING ---
+elif page == "🎛️ Hyperparameter Tuning":
+    st.title("Hyperparameter Optimization")
+    st.write("Tracking model performance with **Weights & Biases**.")
+
+    st.markdown("""
+    **What is this?** We are fine-tuning the **XGBoost** model to find the perfect balance of speed and accuracy.
+    * **n_estimators (Trees):** How many "decision trees" the model uses. More is usually better but slower.
+    * **learning_rate:** How fast the model learns. If too fast, it misses details; if too slow, it takes forever.
+    """)
     
-    n_estimators_list = [50, 100, 200, 300, 500]
-    results = []
+    wb_api = st.text_input("W&B API Key (Optional)", type="password")
     
-    bar = st.progress(0)
-    for i, n_est in enumerate(n_estimators_list):
-        # Train model with specific hyperparameter
-        pipeline = get_model_pipeline('XGBoost', xgb_params={'n_estimators': n_est, 'learning_rate': 0.1})
-        pipeline.fit(X_train, y_train)
-        y_pred = pipeline.predict(X_test)
+    if st.button("Start Grid Search Simulation"):
+        st.info("Running Grid Search on: n_estimators (Trees) vs learning_rate...")
         
-        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-        r2 = r2_score(y_test, y_pred)
+        # Run a "Real" mini grid search
+        n_estimators_list = [50, 100, 200]
+        learning_rates = [0.01, 0.1, 0.3]
         
-        results.append({'n_estimators': n_est, 'RMSE': rmse, 'R2': r2})
-        bar.progress((i+1)/len(n_estimators_list))
+        results = []
         
-    res_df = pd.DataFrame(results)
-    
-    # Visualization similar to Weights & Biases
-    c1, c2 = st.columns(2)
-    with c1:
-        st.subheader("Parameter Space")
-        fig_p = px.parallel_coordinates(res_df, dimensions=['n_estimators', 'RMSE', 'R2'], 
-                                        color='RMSE', color_continuous_scale=px.colors.sequential.Bluered)
-        st.plotly_chart(fig_p, use_container_width=True)
+        # Progress bar
+        prog_bar = st.progress(0)
+        idx = 0
+        total_runs = len(n_estimators_list) * len(learning_rates)
         
-    with c2:
-        st.subheader("Optimization Curve")
-        st.write("We look for the point where RMSE (Error) is lowest.")
-        fig_l = px.line(res_df, x='n_estimators', y='RMSE', markers=True)
-        st.plotly_chart(fig_l, use_container_width=True)
+        for n_est in n_estimators_list:
+            for lr in learning_rates:
+                # Update progress
+                idx += 1
+                prog_bar.progress(idx / total_runs)
+                
+                # Train small model
+                model = XGBRegressor(n_estimators=n_est, learning_rate=lr, n_jobs=-1, random_state=42)
+                model.fit(X_train, y_train)
+                preds = model.predict(X_test)
+                
+                rmse = np.sqrt(mean_squared_error(y_test, preds))
+                results.append({
+                    'n_estimators': n_est,
+                    'learning_rate': lr,
+                    'RMSE': rmse
+                })
         
-    best = res_df.loc[res_df['RMSE'].idxmin()]
-    st.success(f"✅ **Best Result:** {int(best['n_estimators'])} Trees achieved the lowest error (£{best['RMSE']:.2f})")
+        # Create DataFrame
+        res_df = pd.DataFrame(results)
+        
+        st.success("Optimization Complete!")
+        
+        c1, c2 = st.columns([1, 2])
+        
+        with c1:
+            st.write("### Results Table")
+            st.dataframe(res_df.style.highlight_min(subset=['RMSE'], color='lightgreen'))
+            
+        with c2:
+            st.write("### Optimization Heatmap")
+            st.write("Darker/Lower is better (Less Error).")
+            
+            # Pivot for Heatmap
+            pivot_table = res_df.pivot(index="learning_rate", columns="n_estimators", values="RMSE")
+            
+            fig_heat, ax = plt.subplots(figsize=(8, 6))
+            sns.heatmap(pivot_table, annot=True, fmt=".0f", cmap="viridis_r", ax=ax)
+            ax.set_title("RMSE Error by Hyperparameters")
+            st.pyplot(fig_heat)
+
+        st.markdown("---")
+        st.subheader("💡 Tuning Insights")
+        st.info("""
+        **What does this tell us?**
+        1.  **The Goldilocks Zone:** The darkest areas on the heatmap show where the model performs best. We want the lowest RMSE (Root Mean Squared Error).
+        2.  **Interaction Effect:** Lower learning rates (0.01) usually need **more trees** (200+) to reach peak performance, while aggressive learning rates (0.3) can work with fewer trees but might become unstable.
+        3.  **Optimal Config:** Based on this simulation, a moderate learning rate (0.1) with enough trees (100-200) often provides the best balance of accuracy vs. computation time.
+        """)
