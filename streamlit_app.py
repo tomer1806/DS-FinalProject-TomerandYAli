@@ -6,14 +6,16 @@ import matplotlib.pyplot as plt
 import shap
 import wandb
 import os
+import streamlit.components.v1 as components # Required for SHAP Force Plot
 
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_error, r2_score, mean_squared_error
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, OrdinalEncoder
 from sklearn.compose import ColumnTransformer
+from sklearn.tree import plot_tree, DecisionTreeRegressor # Added DecisionTreeRegressor for Viz
 
 # --- 1. PAGE CONFIG ---
 st.set_page_config(
@@ -24,6 +26,11 @@ st.set_page_config(
 
 # Set Seaborn style for better charts
 sns.set_theme(style="whitegrid")
+
+#Helper function to render SHAP JS in Streamlit
+def st_shap(plot, height=None):
+    shap_html = f"<head>{shap.getjs()}</head><body>{plot.html()}</body>"
+    components.html(shap_html, height=height)
 
 # --- 2. DATA LOADING & PROCESSING (Cached) ---
 @st.cache_data
@@ -307,8 +314,8 @@ elif page == "🤖 Prediction & Evaluation":
     with st.expander("⚙️ Configure Vehicle", expanded=True):
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            p_model = st.selectbox("Model", sorted(df_raw['model'].unique()), index=5)
-            # UPDATED: Default Year to 2022
+            # FIX: Default index=0 for '1 Series' (usually first alphabetically)
+            p_model = st.selectbox("Model", sorted(df_raw['model'].unique()), index=0)
             p_year = st.slider("Year", 2000, 2024, 2022)
         with col2:
             p_trans = st.selectbox("Transmission", df_raw['transmission'].unique())
@@ -359,53 +366,105 @@ elif page == "🔍 AI Explainability":
     st.title("🤖 Why did the model predict that?")
     st.info("Using SHAP (SHapley Additive exPlanations) to understand feature drivers.")
 
+    # FIX: Robustly Initialize session state for SHAP
+    if 'shap_values' not in st.session_state:
+        st.session_state.shap_values = None
+    if 'X_display' not in st.session_state:
+        st.session_state.X_display = None
+    if 'model_choice' not in st.session_state:
+        st.session_state.model_choice = None
+
     model_choice = st.selectbox("Choose Model", ["XGBoost", "Random Forest", "Linear Regression"])
     
+    # Store user choice in session state to detect changes
     if st.button("Generate Explanation"):
         with st.spinner("Calculating SHAP values (Optimized)..."):
             model = models[model_choice]
             X_sample = X_test.iloc[:100].copy() 
             
-            # --- INVERSE TRANSFORM FOR DISPLAY ---
+            # Inverse Transform for Display
             scaler = preprocessor.named_transformers_['num']
             num_cols = ['year', 'mileage', 'tax', 'mpg', 'engineSize']
             
             X_display = X_sample.copy()
             X_display[num_cols] = scaler.inverse_transform(X_sample[num_cols])
 
-            # Select Explainer
+            # Calculate SHAP
             if model_choice == "Linear Regression":
                 explainer = shap.LinearExplainer(model, X_train.iloc[:100])
                 shap_values = explainer.shap_values(X_sample)
             else:
                 explainer = shap.TreeExplainer(model)
                 shap_values = explainer.shap_values(X_sample)
+            
+            # SAVE TO SESSION STATE
+            st.session_state.shap_values = shap_values
+            st.session_state.X_display = X_display
+            st.session_state.model_choice = model_choice
 
-            # --- PLOT 1: Feature Importance ---
-            st.subheader(f"1. Global Feature Importance ({model_choice})")
-            st.write("Which features change the price the most on average?")
+    # CHECK IF DATA EXISTS IN SESSION STATE
+    if st.session_state.shap_values is not None:
+        
+        # Retrieve from state
+        shap_values = st.session_state.shap_values
+        X_display = st.session_state.X_display
+        current_model = st.session_state.model_choice
+
+        # PLOT 1: Feature Importance
+        st.subheader(f"1. Global Feature Importance ({current_model})")
+        st.write("Which features change the price the most on average?")
+        
+        fig_shap1 = plt.figure(figsize=(10, 6))
+        shap.summary_plot(shap_values, X_display, plot_type="bar", show=False)
+        st.pyplot(fig_shap1)
+        
+        # PLOT 2: Dependence Plot
+        st.subheader("2. Deep Dive: Feature Dependence")
+        feature_options = ["mileage", "year", "engineSize", "mpg", "tax"]
+        selected_feature = st.selectbox("Select feature to analyze:", feature_options, index=0)
+        
+        feat_col = [c for c in X_display.columns if selected_feature in c]
+        if feat_col:
+            fig_shap2, ax = plt.subplots(figsize=(10, 6))
+            shap.dependence_plot(feat_col[0], shap_values, X_display, ax=ax, show=False)
+            st.pyplot(fig_shap2)
+        else:
+            st.warning(f"Could not find {selected_feature} in dataset.")
+
+        # PLOT 3: Tree Visualization (Fixed to use RAW values)
+        st.markdown("---")
+        st.subheader("3. Random Forest: Under the Hood")
+        
+        if current_model == "Random Forest":
+            st.write("Comparing **SHAP (Contribution)** vs **Tree Structure (Rules)**.")
+            st.write("Below is **one single tree** trained on raw data to demonstrate clear logic (e.g., Year <= 2017).")
             
-            fig_shap1 = plt.figure(figsize=(10, 6))
-            shap.summary_plot(shap_values, X_display, plot_type="bar", show=False)
-            st.pyplot(fig_shap1)
+            # --- CREATE A VIZ-ONLY TREE WITH RAW DATA ---
+            # 1. Prepare Raw Data
+            X_viz = df_raw.drop('price', axis=1)
+            y_viz = df_raw['price']
             
-            # --- PLOT 2: Dependence Plot (Interactive) ---
-            st.subheader("2. Deep Dive: Feature Dependence")
-            st.write("How does a specific feature impact the price?")
+            # 2. Simple Ordinal Encoding for text columns (so tree handles them as 1, 2, 3...)
+            cat_cols = ['model', 'transmission', 'fuelType']
+            oe = OrdinalEncoder()
+            X_viz[cat_cols] = oe.fit_transform(X_viz[cat_cols])
             
-            # --- NEW: Allow user to select the feature for deep dive ---
-            feature_options = ["mileage", "year", "engineSize", "mpg", "tax"]
-            selected_feature = st.selectbox("Select feature to analyze:", feature_options, index=0)
+            # 3. Train a small tree just for this picture
+            viz_tree = DecisionTreeRegressor(max_depth=3, random_state=42)
+            viz_tree.fit(X_viz, y_viz)
             
-            # Find the index/name of selected feature
-            feat_col = [c for c in X_display.columns if selected_feature in c]
-            
-            if feat_col:
-                fig_shap2, ax = plt.subplots(figsize=(10, 6))
-                shap.dependence_plot(feat_col[0], shap_values, X_display, ax=ax, show=False)
-                st.pyplot(fig_shap2)
-            else:
-                st.warning(f"Could not find {selected_feature} in dataset.")
+            # 4. Plot
+            fig_tree, ax_tree = plt.subplots(figsize=(20, 10))
+            plot_tree(viz_tree, 
+                      feature_names=X_viz.columns, 
+                      filled=True, 
+                      rounded=True,
+                      impurity=False, # Hide impurity (squared_error)
+                      fontsize=10, 
+                      ax=ax_tree)
+            st.pyplot(fig_tree)
+        else:
+            st.info("Select 'Random Forest' in the dropdown above to see the Decision Tree visualization.")
 
 
 # --- 8. PAGE 5: TUNING ---
@@ -424,24 +483,29 @@ elif page == "🎛️ Hyperparameter Tuning":
     if st.button("Start Grid Search Simulation"):
         st.info("Running Grid Search on: n_estimators (Trees) vs learning_rate...")
         
+        # --- NEW: Explicit Login ---
+        if wb_api:
+            try:
+                wandb.login(key=wb_api)
+                st.success("Logged into Weights & Biases!")
+            except:
+                st.error("Invalid W&B Key. Running offline.")
+
         # Run a "Real" mini grid search
         n_estimators_list = [50, 100, 200]
         learning_rates = [0.01, 0.1, 0.3]
         
         results = []
         
-        # Progress bar
         prog_bar = st.progress(0)
         idx = 0
         total_runs = len(n_estimators_list) * len(learning_rates)
         
         for n_est in n_estimators_list:
             for lr in learning_rates:
-                # Update progress
                 idx += 1
                 prog_bar.progress(idx / total_runs)
                 
-                # Train small model
                 model = XGBRegressor(n_estimators=n_est, learning_rate=lr, n_jobs=-1, random_state=42)
                 model.fit(X_train, y_train)
                 preds = model.predict(X_test)
@@ -452,8 +516,13 @@ elif page == "🎛️ Hyperparameter Tuning":
                     'learning_rate': lr,
                     'RMSE': rmse
                 })
+                
+                # --- NEW: Log to W&B ---
+                if wb_api:
+                    run = wandb.init(project="bmw-price-opt", config={'n_estimators': n_est, 'lr': lr}, reinit=True)
+                    wandb.log({'RMSE': rmse})
+                    run.finish()
         
-        # Create DataFrame
         res_df = pd.DataFrame(results)
         
         st.success("Optimization Complete!")
@@ -466,21 +535,21 @@ elif page == "🎛️ Hyperparameter Tuning":
             
         with c2:
             st.write("### Optimization Heatmap")
-            st.write("Darker/Lower is better (Less Error).")
+            st.write("Darker colors (Purple/Blue) = Lower Error (Better).")
             
-            # Pivot for Heatmap
             pivot_table = res_df.pivot(index="learning_rate", columns="n_estimators", values="RMSE")
             
             fig_heat, ax = plt.subplots(figsize=(8, 6))
-            sns.heatmap(pivot_table, annot=True, fmt=".0f", cmap="viridis_r", ax=ax)
-            ax.set_title("RMSE Error by Hyperparameters")
+            # FIX: Used 'viridis' (Default) so Low Values (Good) are Dark Purple/Blue, High Values (Bad) are Yellow
+            sns.heatmap(pivot_table, annot=True, fmt=".0f", cmap="viridis", ax=ax)
+            ax.set_title("RMSE Error (Lower is Better)")
             st.pyplot(fig_heat)
 
         st.markdown("---")
         st.subheader("💡 Tuning Insights")
         st.info("""
         **What does this tell us?**
-        1.  **The Goldilocks Zone:** The darkest areas on the heatmap show where the model performs best. We want the lowest RMSE (Root Mean Squared Error).
-        2.  **Interaction Effect:** Lower learning rates (0.01) usually need **more trees** (200+) to reach peak performance, while aggressive learning rates (0.3) can work with fewer trees but might become unstable.
-        3.  **Optimal Config:** Based on this simulation, a moderate learning rate (0.1) with enough trees (100-200) often provides the best balance of accuracy vs. computation time.
+        1.  **The Goldilocks Zone:** The darkest areas (Purple/Blue) on the heatmap show where the model performs best (Lowest Error).
+        2.  **Interaction Effect:** Lower learning rates (0.01) usually need **more trees** (200+) to reach peak performance.
+        3.  **Optimal Config:** Look for the darkest cell – that represents the lowest error in our experiment.
         """)
