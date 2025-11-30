@@ -77,7 +77,7 @@ def build_pipeline(df):
     # Train Models
     models = {
         'Linear Regression': LinearRegression().fit(X_train, y_train),
-        'XGBoost': XGBRegressor(n_estimators=100, learning_rate=0.1, random_state=42).fit(X_train, y_train),
+        'XGBoost': XGBRegressor(n_estimators=100, learning_rate=0.3, random_state=42).fit(X_train, y_train),
         'Random Forest': RandomForestRegressor(n_estimators=50, max_depth=10, random_state=42).fit(X_train, y_train)
     }
 
@@ -182,8 +182,8 @@ elif page == "📊 Data Visualizations":
         st.header("Which Series is most expensive?")
         
         st.info("""
-        **Key Insight:** The **X7 and 8 Series command the highest median prices**, reflecting the premium positioning of BMW's luxury SUV and Tourer segments.
-        In contrast, the **1 Series and 3 Series offer the most affordable entry points**, though their wide price ranges indicate that condition and age vary heavily in these popular models.
+        **Key Insight:** The **X7, M5 and 8 Series command the highest median prices**, reflecting the premium positioning of BMW's luxury SUV and Tourer segments.
+        In contrast, the **1 Series, Z3 and 3 Series offer the most affordable entry points**, though their wide price ranges indicate that condition and age vary heavily in these popular models.
         """)
         
         # Calculate median price to sort the chart
