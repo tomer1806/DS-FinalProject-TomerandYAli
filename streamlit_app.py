@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import shap
 import wandb
 import os
-import streamlit.components.v1 as components # Required for SHAP Force Plot
+import streamlit.components.v1 as components # for using SHAP
 
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
@@ -15,7 +15,7 @@ from xgboost import XGBRegressor
 from sklearn.metrics import mean_absolute_error, r2_score, mean_squared_error
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, OrdinalEncoder
 from sklearn.compose import ColumnTransformer
-from sklearn.tree import plot_tree, DecisionTreeRegressor # Added DecisionTreeRegressor for Viz
+from sklearn.tree import plot_tree, DecisionTreeRegressor # For decision tree visualization
 
 # --- 1. PAGE CONFIG ---
 st.set_page_config(
@@ -27,12 +27,12 @@ st.set_page_config(
 # Set Seaborn style for better charts
 sns.set_theme(style="whitegrid")
 
-#Helper function to render SHAP JS in Streamlit
+#Helper function for Shap
 def st_shap(plot, height=None):
     shap_html = f"<head>{shap.getjs()}</head><body>{plot.html()}</body>"
     components.html(shap_html, height=height)
 
-# --- 2. DATA LOADING & PROCESSING (Cached) ---
+# --- 2. DATA LOADING & PROCESSING using Cache to 'save' time ---
 @st.cache_data
 def load_data():
     try:
@@ -51,7 +51,7 @@ def build_pipeline(df):
     categorical_cols = ['model', 'transmission', 'fuelType']
     numerical_cols = ['year', 'mileage', 'tax', 'mpg', 'engineSize']
     
-    # Build Transformer
+    # Transform to Categorical columns
     preprocessor = ColumnTransformer(
         transformers=[
             ('num', StandardScaler(), numerical_cols),
@@ -59,8 +59,6 @@ def build_pipeline(df):
         ],
         verbose_feature_names_out=False
     )
-    
-    # Transform data
     X_processed = preprocessor.fit_transform(X)
     
     # Get feature names
@@ -71,10 +69,10 @@ def build_pipeline(df):
         
     X_processed_df = pd.DataFrame(X_processed, columns=feature_names)
     
-    # Split Data
+    # Split Data as learned in class
     X_train, X_test, y_train, y_test = train_test_split(X_processed_df, y, test_size=0.2, random_state=42)
     
-    # Train Models
+    # Train all models
     models = {
         'Linear Regression': LinearRegression().fit(X_train, y_train),
         'XGBoost': XGBRegressor(n_estimators=100, learning_rate=0.3, random_state=42).fit(X_train, y_train),
@@ -90,7 +88,7 @@ if df_raw is None:
     st.error("🚨 Error: 'bmw.csv' not found. Please upload it.")
     st.stop()
 
-# Initialize Pipeline
+# Init data and pipeline
 with st.spinner("⚙️ Training Models & Preparing Data..."):
     models, X_train, X_test, y_train, y_test, preprocessor, feature_names = build_pipeline(df_raw)
 
@@ -167,8 +165,7 @@ elif page == "📊 Data Visualizations":
         **Key Insight:** This chart confirms that **mileage is the strongest negative driver of price**, with a sharp drop in value occurring within the first 40,000 miles. 
         However, **newer models (lighter dots) successfully resist this trend**, maintaining significantly higher residual values even at higher mileage points compared to older equivalents.
         """)
-        
-        # Optimization: Sample data so the chart renders instantly
+        #Presenting graphs with main conclusions
         plot_data = df_raw.sample(n=min(2000, len(df_raw)), random_state=42)
         
         fig1, ax1 = plt.subplots(figsize=(10, 6))
@@ -273,7 +270,7 @@ elif page == "🤖 Prediction & Evaluation":
         ax.set_ylabel("Predicted Price (£)")
         return fig
 
-    # --- NEW: COMBINED GRAPH ---
+    # Implementing the combined graph with all 3 models
     with g0:
         st.write("Comparing all models on the same data points.")
         fig_comb, ax_comb = plt.subplots(figsize=(10, 7))
@@ -314,7 +311,6 @@ elif page == "🤖 Prediction & Evaluation":
     with st.expander("⚙️ Configure Vehicle", expanded=True):
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            # FIX: Default index=0 for '1 Series' (usually first alphabetically)
             p_model = st.selectbox("Model", sorted(df_raw['model'].unique()), index=0)
             p_year = st.slider("Year", 2000, 2024, 2022)
         with col2:
@@ -330,7 +326,7 @@ elif page == "🤖 Prediction & Evaluation":
         run_pred = st.button("Predict Price (Run All Models) 🚀", type="primary")
 
     if run_pred:
-        # Prepare Input
+        # Get and read the input
         input_data = pd.DataFrame({
             'model': [p_model], 'year': [p_year], 'transmission': [p_trans],
             'mileage': [p_miles], 'fuelType': [p_fuel], 'tax': [p_tax],
@@ -366,7 +362,6 @@ elif page == "🔍 AI Explainability":
     st.title("🤖 Why did the model predict that?")
     st.info("Using SHAP (SHapley Additive exPlanations) to understand feature drivers.")
 
-    # FIX: Robustly Initialize session state for SHAP
     if 'shap_values' not in st.session_state:
         st.session_state.shap_values = None
     if 'X_display' not in st.session_state:
@@ -431,7 +426,7 @@ elif page == "🔍 AI Explainability":
         else:
             st.warning(f"Could not find {selected_feature} in dataset.")
 
-        # PLOT 3: Tree Visualization (Fixed to use RAW values)
+        # PLOT 3: Tree Visualization
         st.markdown("---")
         st.subheader("3. Random Forest: Under the Hood")
         
@@ -455,13 +450,7 @@ elif page == "🔍 AI Explainability":
             
             # 4. Plot
             fig_tree, ax_tree = plt.subplots(figsize=(20, 10))
-            plot_tree(viz_tree, 
-                      feature_names=X_viz.columns, 
-                      filled=True, 
-                      rounded=True,
-                      impurity=False, # Hide impurity (squared_error)
-                      fontsize=10, 
-                      ax=ax_tree)
+            plot_tree(viz_tree, feature_names=X_viz.columns, filled=True, rounded=True, impurity=False, fontsize=10, ax=ax_tree)
             st.pyplot(fig_tree)
         else:
             st.info("Select 'Random Forest' in the dropdown above to see the Decision Tree visualization.")
@@ -483,7 +472,7 @@ elif page == "🎛️ Hyperparameter Tuning":
     if st.button("Start Grid Search Simulation"):
         st.info("Running Grid Search on: n_estimators (Trees) vs learning_rate...")
         
-        # --- NEW: Explicit Login ---
+        # Wandb login for storing the results
         if wb_api:
             try:
                 wandb.login(key=wb_api)
@@ -517,7 +506,7 @@ elif page == "🎛️ Hyperparameter Tuning":
                     'RMSE': rmse
                 })
                 
-                # --- NEW: Log to W&B ---
+                # Log results into wandb
                 if wb_api:
                     run = wandb.init(project="bmw-price-opt", config={'n_estimators': n_est, 'lr': lr}, reinit=True)
                     wandb.log({'RMSE': rmse})
@@ -540,7 +529,6 @@ elif page == "🎛️ Hyperparameter Tuning":
             pivot_table = res_df.pivot(index="learning_rate", columns="n_estimators", values="RMSE")
             
             fig_heat, ax = plt.subplots(figsize=(8, 6))
-            # FIX: Used 'viridis' (Default) so Low Values (Good) are Dark Purple/Blue, High Values (Bad) are Yellow
             sns.heatmap(pivot_table, annot=True, fmt=".0f", cmap="viridis", ax=ax)
             ax.set_title("RMSE Error (Lower is Better)")
             st.pyplot(fig_heat)
