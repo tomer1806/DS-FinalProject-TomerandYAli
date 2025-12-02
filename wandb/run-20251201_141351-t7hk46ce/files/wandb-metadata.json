@@ -1,0 +1,28 @@
+{
+  "os": "Linux-6.8.0-1030-azure-x86_64-with-glibc2.31",
+  "python": "CPython 3.11.13",
+  "startedAt": "2025-12-01T14:13:51.186796Z",
+  "program": "streamlit_app.py",
+  "codePath": "streamlit_app.py",
+  "codePathLocal": "streamlit_app.py",
+  "git": {
+    "remote": "https://github.com/tomer1806/DS-FinalProject-TomerandYAli",
+    "commit": "16900ef46addb6b4c1888b05cf2dfe250524302b"
+  },
+  "email": "alfandary1@mail.tau.ac.il",
+  "root": "/workspaces/DS-FinalProject-TomerandYAli",
+  "host": "codespaces-52f071",
+  "executable": "/usr/local/bin/python3.11",
+  "cpu_count": 1,
+  "cpu_count_logical": 2,
+  "disk": {
+    "/": {
+      "total": "33636024320",
+      "used": "4257222656"
+    }
+  },
+  "memory": {
+    "total": "8330579968"
+  },
+  "writerId": "ijfml1agia6axpe8ivkf990jv0wdlfo5"
+}

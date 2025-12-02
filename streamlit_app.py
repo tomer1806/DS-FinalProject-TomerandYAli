@@ -280,7 +280,7 @@ elif page == "🤖 Prediction & Evaluation":
         y_true_samp = y_test.iloc[indices]
         
         # Plot 3 models with distinct colors
-        sns.scatterplot(x=y_true_samp, y=pred_lr_test[indices], color='red', alpha=0.4, label='Linear Regression', ax=ax_comb)
+        sns.scatterplot(x=y_true_samp, y=pred_lr_test[indices], color='blue', alpha=0.4, label='Linear Regression', ax=ax_comb)
         sns.scatterplot(x=y_true_samp, y=pred_rf_test[indices], color='orange', alpha=0.4, label='Random Forest', ax=ax_comb)
         sns.scatterplot(x=y_true_samp, y=pred_xgb_test[indices], color='green', alpha=0.4, label='XGBoost', ax=ax_comb)
         
@@ -296,7 +296,7 @@ elif page == "🤖 Prediction & Evaluation":
         st.pyplot(fig_comb)
 
     with g1:
-        st.pyplot(plot_actual_vs_pred(y_test, pred_lr_test, "Linear Regression", "red"))
+        st.pyplot(plot_actual_vs_pred(y_test, pred_lr_test, "Linear Regression", "blue"))
     with g2:
         st.pyplot(plot_actual_vs_pred(y_test, pred_xgb_test, "XGBoost", "green"))
     with g3:
@@ -421,7 +421,7 @@ elif page == "🔍 AI Explainability":
         feat_col = [c for c in X_display.columns if selected_feature in c]
         if feat_col:
             fig_shap2, ax = plt.subplots(figsize=(10, 6))
-            shap.dependence_plot(feat_col[0], shap_values, X_display, ax=ax, show=False)
+            shap.dependence_plot(feat_col[0], shap_values, X_display, ax=ax, show=False, interaction_index=None)
             st.pyplot(fig_shap2)
         else:
             st.warning(f"Could not find {selected_feature} in dataset.")
@@ -432,7 +432,7 @@ elif page == "🔍 AI Explainability":
         
         if current_model == "Random Forest":
             st.write("Comparing **SHAP (Contribution)** vs **Tree Structure (Rules)**.")
-            st.write("Below is **one single tree** trained on raw data to demonstrate clear logic (e.g., Year <= 2017).")
+            st.write("Below is **one single tree** trained on raw data to demonstrate clear logic.")
             
             # --- CREATE A VIZ-ONLY TREE WITH RAW DATA ---
             # 1. Prepare Raw Data
@@ -462,7 +462,7 @@ elif page == "🎛️ Hyperparameter Tuning":
     st.write("Tracking model performance with **Weights & Biases**.")
 
     st.markdown("""
-    **What is this?** We are fine-tuning the **XGBoost** model to find the perfect balance of speed and accuracy.
+    We are fine-tuning the **XGBoost** model to find the perfect balance of speed and accuracy.
     * **n_estimators (Trees):** How many "decision trees" the model uses. More is usually better but slower.
     * **learning_rate:** How fast the model learns. If too fast, it misses details; if too slow, it takes forever.
     """)
@@ -536,8 +536,8 @@ elif page == "🎛️ Hyperparameter Tuning":
         st.markdown("---")
         st.subheader("💡 Tuning Insights")
         st.info("""
-        **What does this tell us?**
-        1.  **The Goldilocks Zone:** The darkest areas (Purple/Blue) on the heatmap show where the model performs best (Lowest Error).
-        2.  **Interaction Effect:** Lower learning rates (0.01) usually need **more trees** (200+) to reach peak performance.
-        3.  **Optimal Config:** Look for the darkest cell – that represents the lowest error in our experiment.
+        **What did we learn?**
+        1.  The darkest areas (Purple/Blue) on the heatmap show where the model performs best (Lowest Error).
+        2.  Lower learning rates (0.01) usually need **more trees** (200+) to reach peak performance.
+        3.  The darkest cell represents the lowest error in our experiment.
         """)
