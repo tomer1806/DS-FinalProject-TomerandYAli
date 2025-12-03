@@ -112,7 +112,7 @@ if page == "🏠 Business Case & Data":
     
     # Image Handling
     if os.path.exists("img.jpg"):
-        st.image("img.jpg", caption="The Ultimate Driving Machine", width=700)
+        st.image("img.jpg", width=700)
     else:
         st.warning("⚠️ 'img.jpg' not found. Please upload an image.")
 
